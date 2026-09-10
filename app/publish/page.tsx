@@ -4,6 +4,9 @@ import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
+const MAX_COVER_BYTES = 10 * 1024 * 1024
+const MAX_EBOOK_BYTES = 50 * 1024 * 1024
+
 async function sha256(file: File) {
   const buffer = await file.arrayBuffer()
   const hash = await crypto.subtle.digest('SHA-256', buffer)
@@ -56,12 +59,12 @@ export default function PublishPage() {
       setError('Il file del libro deve essere PDF oppure EPUB.')
       setLoading(false); setProgress(''); return
     }
-    if (cover.size > 10 * 1024 * 1024) {
-      setError('La copertina supera il limite di 10 MB.')
+    if (cover.size > MAX_COVER_BYTES) {
+      setError('La copertina supera il limite massimo di 10 MB.')
       setLoading(false); setProgress(''); return
     }
-    if (manuscript.size > 500 * 1024 * 1024) {
-      setError('Il file del libro supera il limite di 500 MB.')
+    if (manuscript.size > MAX_EBOOK_BYTES) {
+      setError('Il file supera il limite massimo di 50 MB. Riduci il PDF oppure carica una versione EPUB più leggera.')
       setLoading(false); setProgress(''); return
     }
 
@@ -90,9 +93,13 @@ export default function PublishPage() {
     setProgress('Calcolo l’impronta digitale del file…')
     const digest = await sha256(manuscript)
 
-    setProgress('Carico il manoscritto…')
+    setProgress(manuscript.size > 6 * 1024 * 1024 ? 'Carico il manoscritto: il file è grande, potrebbe richiedere qualche istante…' : 'Carico il manoscritto…')
     const { error: uploadError } = await supabase.storage.from('book-files').upload(manuscriptPath, manuscript, { upsert: false, contentType: manuscript.type || (bookExt === 'pdf' ? 'application/pdf' : 'application/epub+zip') })
-    if (uploadError) { setError(`Errore ebook: ${uploadError.message}`); setLoading(false); setProgress(''); return }
+    if (uploadError) {
+      const tooLarge = /maximum|too large|exceeded|size/i.test(uploadError.message)
+      setError(tooLarge ? 'Il file supera il limite consentito dallo spazio di archiviazione. Per ora Libriva accetta ebook fino a 50 MB.' : `Errore ebook: ${uploadError.message}`)
+      setLoading(false); setProgress(''); return
+    }
 
     setProgress('Registro il file…')
     const { data: fileRow, error: fileError } = await supabase.from('book_files').insert({
@@ -129,7 +136,7 @@ export default function PublishPage() {
       <label>Lingua<select name="language" defaultValue="it"><option value="it">Italiano</option><option value="en">Inglese</option><option value="es">Spagnolo</option><option value="fr">Francese</option></select></label>
       <label>Prezzo (€) *<input name="price" inputMode="decimal" defaultValue="4,99" required /></label>
       <label>Copertina *<input name="cover" type="file" accept="image/jpeg,image/png,image/webp" required /><small className="field-help">JPG, PNG o WEBP. Massimo 10 MB.</small></label>
-      <label>File ebook *<input name="manuscript" type="file" accept="application/pdf,.pdf,application/epub+zip,.epub" required /><small className="field-help">PDF o EPUB. Massimo 500 MB.</small></label>
+      <label>File ebook *<input name="manuscript" type="file" accept="application/pdf,.pdf,application/epub+zip,.epub" required /><small className="field-help">PDF o EPUB. Massimo 50 MB.</small></label>
       <label className="rights-check"><input type="checkbox" name="rights" required /> <span>Confermo di possedere i diritti necessari per pubblicare e vendere quest’opera su Libriva.</span></label>
       {progress && <div className="auth-success">{progress}</div>}
       {error && <div className="auth-error">{error}</div>}
